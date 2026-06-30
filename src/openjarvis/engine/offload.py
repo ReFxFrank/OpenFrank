@@ -418,6 +418,33 @@ def plan_offload(
     )
 
 
+def ollama_runtime_env(
+    flash_attention: bool = True, kv_cache_quant: str = "q8"
+) -> Dict[str, str]:
+    """Server-level Ollama env vars that keep long context within the VRAM budget.
+
+    Flash attention and KV-cache quantization are configured at ``ollama serve``
+    startup (they are not per-request options), so set these in the environment
+    *before* launching Ollama. KV-cache quant (Q8 ≈ half the fp16 cache) requires
+    flash attention to be on. Context is a VRAM tax — these roughly halve it.
+    """
+    env: Dict[str, str] = {}
+    if flash_attention:
+        env["OLLAMA_FLASH_ATTENTION"] = "1"
+    mapping = {
+        "q8": "q8_0",
+        "q8_0": "q8_0",
+        "q4": "q4_0",
+        "q4_0": "q4_0",
+        "f16": "f16",
+        "fp16": "f16",
+    }
+    cache_type = mapping.get((kv_cache_quant or "").strip().lower())
+    if cache_type and flash_attention:
+        env["OLLAMA_KV_CACHE_TYPE"] = cache_type
+    return env
+
+
 def resolve_profile(name: str, status: VramStatus) -> OffloadProfile:
     """Resolve a configured profile name, honouring ``"auto"``."""
     key = (name or "").strip().lower()
@@ -441,6 +468,7 @@ __all__ = [
     "estimate_kv_cache_gb",
     "estimate_model_size_gb",
     "estimate_total_layers",
+    "ollama_runtime_env",
     "plan_offload",
     "read_vram",
     "resolve_profile",

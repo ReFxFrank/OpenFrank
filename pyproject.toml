@@ -79,6 +79,12 @@ memory-colbert = [
 ]
 memory-pdf = ["pdfplumber>=0.10"]
 memory-bm25 = ["rank-bm25>=0.2.2"]
+# Persistent local vector store (no external service); pair with a local
+# embedder (Ollama nomic-embed-text by default).
+memory-sqlite-vec = [
+    "sqlite-vec>=0.1.6",
+    "numpy>=1.24",
+]
 server = [
     "fastapi>=0.110",
     "uvicorn>=0.30",

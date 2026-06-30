@@ -926,6 +926,20 @@ class StorageConfig:
     chunk_size: int = 512
     chunk_overlap: int = 64
 
+    # Dense-retrieval embeddings (Phase 3). Local only: Ollama by default,
+    # never a hosted embedding API. Kept resident (tiny) across offload profiles.
+    embedding_model: str = "nomic-embed-text"
+    embedding_engine: str = "ollama"  # "ollama" | "sentence-transformers"
+
+    # Reranking (Phase 3): re-score the top retrieved candidates with a local
+    # cross-encoder, then drop anything below the relevance threshold so only
+    # genuinely relevant context reaches the model (keeps the KV-cache cheap).
+    rerank_enabled: bool = False
+    rerank_backend: str = "auto"  # "auto" | "cross-encoder" | "lexical"
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_min_score: float = 0.0  # relevance threshold (drop results below)
+    rerank_fetch_multiplier: int = 4  # over-fetch factor before reranking
+
     # Automatic memory service — extracts durable facts from conversations in
     # the background and persists them across sessions (see openjarvis.memory).
     enabled: bool = False  # start the memory service with serve/chat

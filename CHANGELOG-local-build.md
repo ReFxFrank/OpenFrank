@@ -11,6 +11,63 @@ VRAM split) are recorded as targets to re-measure on the real rig — see
 
 ---
 
+## Phase 3 — Memory & RAG upgrade (all offline)
+
+**Goal:** add a persistent local vector store, a local reranker with a relevance
+threshold, and keep long context within the VRAM budget — all 100% on disk/local.
+
+> The existing stack already had dense/FAISS/hybrid/BM25/chunking/ingest, so this
+> phase **extends** it rather than rebuilding. The real gaps were a reranker, the
+> brief's preferred sqlite-vec store, and KV-cache/flash-attn wiring.
+
+- **Persistent local vector store (`tools/storage/sqlite_vec_backend.py`).** A
+  `MemoryBackend` (`sqlite_vec`) built on the sqlite-vec extension: vectors +
+  content + metadata live in **one on-disk SQLite file**, writes are
+  transactional, and **memory survives restarts** (the FAISS backend is in-RAM).
+  Embeds via the local `OllamaEmbedder` (`nomic-embed-text`) by default — never a
+  hosted API. Clear errors if the extension/loader is missing. New optional extra
+  `memory-sqlite-vec`. FAISS stays available for large in-memory indexes; sqlite-vec
+  is the default *persistent* choice (justified in the module docstring).
+
+- **Local cross-encoder reranker (`tools/storage/rerank.py`).** A `Reranker`
+  abstraction with `CrossEncoderReranker` (local `sentence-transformers`, lazy) and
+  a dependency-free `LexicalReranker` (BM25-lite) fallback that never reaches the
+  network. `rerank()` re-scores, applies a **relevance threshold**, and truncates;
+  `RerankingMemory` wraps *any* base backend (over-fetch → rerank → threshold), so
+  it composes with sqlite/FAISS/hybrid. `get_reranker("auto")` uses the
+  cross-encoder if installed, else lexical.
+
+- **Backend factory (`tools/storage/factory.py`).** `build_backend(config)` — one
+  tested entry point that builds the configured base backend and composes the
+  rerank stage when `rerank_enabled`, so CLI/server get identical wiring.
+
+- **Config.** `StorageConfig` gains local-embedding settings (`embedding_engine`
+  = ollama, `embedding_model` = nomic-embed-text) and rerank settings
+  (`rerank_enabled` (opt-in), `rerank_backend`, `rerank_model`, `rerank_min_score`,
+  `rerank_fetch_multiplier`).
+
+- **Long context within budget.** `engine/offload.ollama_runtime_env()` derives
+  the server-level `OLLAMA_FLASH_ATTENTION` / `OLLAMA_KV_CACHE_TYPE` env from the
+  `[offload]` config (KV quant requires flash-attn); the context-vs-free-VRAM
+  tradeoff per tier is documented in `RUNNING-OFFLINE.md`.
+
+- **Docs.** New `docs/local-build/RUNNING-OFFLINE.md`: install (native Windows vs
+  WSL2), `local_only` + VRAM cap, per-tier model pulls, flash-attn/KV-quant, local
+  memory/RAG + doc ingestion, the verify script, and gaming/CPU-fallback.
+
+- **Tests (31):** `tests/tools/storage/test_rerank.py`,
+  `test_sqlite_vec_backend.py` (offline via a deterministic hashing embedder;
+  persistence-across-restart), `test_rag_eval.py` (a small RAG eval — reranking
+  strictly improves MRR + precision@1), `tests/core/test_phase3_config.py`,
+  `tests/engine/test_offload_env.py`.
+
+**Verification:** tools + core + engine + memory = 1555 passed, 0 new failures
+(the lone web-search failure is the pre-existing missing-key environmental one);
+ruff clean; sqlite-vec round-trips and survives restart; reranking improves the
+RAG eval.
+
+---
+
 ## Phase 2 — Smarter routing & VRAM-aware model management
 
 **Goal:** route each query to the right tier (fast/balanced/deep) and make hybrid

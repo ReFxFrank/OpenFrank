@@ -31,6 +31,18 @@ try:
 except ImportError:
     pass
 
+# Persistent local vector store (sqlite-vec) — Phase 3 local-build addition.
+try:
+    import openjarvis.tools.storage.sqlite_vec_backend  # noqa: F401
+except ImportError:
+    pass
+
+# Cross-encoder reranking wrapper — dependency-free fallback, so always loads.
+try:
+    import openjarvis.tools.storage.rerank  # noqa: F401
+except ImportError:
+    pass
+
 from openjarvis.tools.storage._stubs import MemoryBackend, RetrievalResult
 from openjarvis.tools.storage.chunking import Chunk, ChunkConfig, chunk_text
 from openjarvis.tools.storage.context import ContextConfig, inject_context
