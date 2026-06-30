@@ -101,6 +101,12 @@ if [ ! -f "$CONFIG" ]; then
   # models in step 8). Without these flags, `jarvis init` blocks on a TTY.
   uv run jarvis init --engine ollama --no-download ||
     warn "jarvis init failed; configure $CONFIG manually (see docs/local-build/RUNNING-OFFLINE.md)."
+  # `jarvis init`'s hardware default can be a tag Ollama doesn't have
+  # (e.g. qwen3.5:4b). Point chat at a model we actually pull, and enable the
+  # tier router so `ask` uses fast/balanced/deep.
+  uv run jarvis config set intelligence.default_model qwen3:8b ||
+    warn "could not set default model; run: uv run jarvis config set intelligence.default_model qwen3:8b"
+  uv run jarvis config set router.enabled true || true
 fi
 
 # --- 7. GPU sanity (soft) --------------------------------------------------
