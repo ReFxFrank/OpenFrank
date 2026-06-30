@@ -1,0 +1,53 @@
+# OpenJarvis — OPT-IN cloud configuration (example, NOT loaded by default)
+# ============================================================================
+#
+# OpenJarvis ships fully local: [runtime] local_only = true is the default, and
+# in that mode the engine factory refuses every cloud backend and fails closed,
+# while the network egress guard blocks all outbound traffic except loopback and
+# your local engines. THIS FILE IS NOT READ AUTOMATICALLY — it exists so the
+# cloud option survives without sitting in everyone's live config.
+#
+# To use cloud engines you must DELIBERATELY opt out of the local guarantee:
+#
+#   1. Set local_only = false below (or export OPENJARVIS_LOCAL_ONLY=0).
+#   2. Provide the relevant API key as an ENVIRONMENT VARIABLE (never commit
+#      keys to config files — store them via your shell/secret manager).
+#   3. Merge the [engine]/[intelligence] sections you want into your real
+#      ~/.openjarvis/config.toml.
+#
+# With local_only = false the egress guard is NOT installed, so the assistant
+# can reach the public internet. Only do this if you accept that data may leave
+# your machine.
+# ============================================================================
+
+[runtime]
+# Lifts the airgap. Cloud engines become instantiable and egress is unblocked.
+local_only = false
+
+[engine]
+# Route to the multiplexed cloud backend (OpenAI / Anthropic / Google /
+# OpenRouter / MiniMax / DeepSeek / Codex). The provider is chosen from whichever
+# API key is present in the environment.
+default = "cloud"
+
+[intelligence]
+# Pick any model your provider serves. Examples (set the matching env var):
+#   ANTHROPIC_API_KEY  -> default_model = "claude-sonnet-4-6"
+#   OPENAI_API_KEY     -> default_model = "gpt-4o"
+#   GEMINI_API_KEY     -> default_model = "gemini-2.5-pro"
+#   OPENROUTER_API_KEY -> default_model = "meta-llama/llama-3.1-70b-instruct"
+default_model = "claude-sonnet-4-6"
+provider = "anthropic"
+
+# Required environment variables (export before launching `jarvis`):
+#
+#   export ANTHROPIC_API_KEY=...      # Anthropic (Claude)
+#   export OPENAI_API_KEY=...         # OpenAI
+#   export GEMINI_API_KEY=...         # Google (or GOOGLE_API_KEY)
+#   export OPENROUTER_API_KEY=...     # OpenRouter (one key, many models)
+#   export MINIMAX_API_KEY=...        # MiniMax
+#   export DEEPSEEK_API_KEY=...       # DeepSeek
+#
+# Alternatively, keep local_only = true and use a litellm proxy you trust by
+# adding its host to [runtime] egress_allowlist — that keeps the guard on for
+# everything else.

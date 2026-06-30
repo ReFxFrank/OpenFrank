@@ -1569,10 +1569,44 @@ class DigestConfig:
     )
 
 
+@dataclass(slots=True)
+class RuntimeConfig:
+    """Runtime execution policy — the fully-local ("airgap") guarantee.
+
+    When ``local_only`` is true (the default), "fully local" stops being a
+    convention and becomes enforced:
+
+    * the engine factory refuses to instantiate any cloud adapter
+      (``InferenceEngine.is_cloud``) and **fails closed** with a clear error
+      instead of silently falling back to the cloud
+      (see ``openjarvis.engine._discovery``);
+    * the network egress guard (``openjarvis.security.egress``) blocks every
+      outbound socket connection except to the allowlist — loopback, the
+      configured local engine hosts, and any host in ``egress_allowlist``.
+
+    ``local_only`` can be overridden at runtime by the ``OPENJARVIS_LOCAL_ONLY``
+    environment variable (``0``/``false``/``no`` → off, ``1``/``true``/``yes``
+    → on); the env var takes precedence over the config file so an operator can
+    force airgap mode without editing TOML.
+    """
+
+    # Hard local-only guarantee. Default true: no cloud, fail closed.
+    local_only: bool = True
+    # Install the process-wide socket egress guard when local_only is active.
+    # Disable only for diagnostics; the engine-factory fail-closed check stays
+    # on regardless of this flag.
+    enforce_egress_guard: bool = True
+    # Extra hosts the egress guard permits in local_only, beyond loopback and
+    # the configured local engine hosts. Comma-separated ``host`` or
+    # ``host:port`` entries (e.g. a local Ollama on another LAN box).
+    egress_allowlist: str = ""
+
+
 @dataclass
 class JarvisConfig:
     """Top-level configuration for OpenJarvis."""
 
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     installed_at: str = ""
     installer_version: str = ""
     hardware: HardwareInfo = field(default_factory=HardwareInfo)
@@ -1837,6 +1871,7 @@ def load_config(path: Optional[Path] = None) -> JarvisConfig:
         # All top-level sections — recursive _apply_toml_section handles
         # nested sub-configs (engine.ollama, learning.routing, channel.*, etc.)
         top_sections = (
+            "runtime",
             "engine",
             "intelligence",
             "learning",
@@ -1891,6 +1926,17 @@ def load_config(path: Optional[Path] = None) -> JarvisConfig:
     if not config_path.exists() and cfg.security.profile:
         apply_security_profile(cfg.security, cfg.server)
 
+    # Environment override for the local-only guarantee. Takes precedence over
+    # the TOML so an operator can force (or lift) airgap mode without editing
+    # config. Unrecognised values are ignored so the config value stands.
+    _local_only_env = os.environ.get("OPENJARVIS_LOCAL_ONLY")
+    if _local_only_env is not None:
+        _v = _local_only_env.strip().lower()
+        if _v in ("1", "true", "yes", "on"):
+            cfg.runtime.local_only = True
+        elif _v in ("0", "false", "no", "off"):
+            cfg.runtime.local_only = False
+
     return cfg
 
 
@@ -1921,6 +1967,12 @@ def generate_minimal_toml(
 # OpenJarvis configuration
 # Hardware: {hw.cpu_brand} ({hw.cpu_count} cores, {hw.ram_gb} GB RAM){gpu_comment}
 # Full reference config: jarvis init --full
+
+[runtime]
+# Fully-local guarantee. true (default) = no cloud: the engine factory refuses
+# cloud backends and fails closed, and outbound network egress is blocked
+# except to loopback/local engines. To opt into cloud, see cloud.example.toml.
+local_only = true
 
 [engine]
 default = "{engine}"
@@ -1956,6 +2008,17 @@ def generate_default_toml(
 #
 # Hardware: {hw.cpu_brand} ({hw.cpu_count} cores, {hw.ram_gb} GB RAM)
 {gpu_line}
+
+[runtime]
+# Fully-local guarantee (airgap mode). When true (the default) OpenJarvis runs
+# 100% on this machine: the engine factory refuses to instantiate any cloud
+# backend and fails closed (never a silent cloud fallback), and the network
+# egress guard blocks every outbound connection except loopback and the local
+# engine hosts below. Override at runtime with OPENJARVIS_LOCAL_ONLY=0.
+# To opt back into cloud engines/keys, copy configs/openjarvis/cloud.example.toml.
+local_only = true
+# enforce_egress_guard = true   # install the process-wide socket guard
+# egress_allowlist = ""          # extra host[:port] entries to permit, comma-sep
 
 [engine]
 default = "{engine}"
@@ -2192,6 +2255,7 @@ __all__ = [
     "IntelligenceLearningConfig",
     "JarvisConfig",
     "LearningConfig",
+    "RuntimeConfig",
     "LMStudioEngineConfig",
     "LlamaCppEngineConfig",
     "MCPConfig",

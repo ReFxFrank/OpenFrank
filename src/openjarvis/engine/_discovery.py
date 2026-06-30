@@ -9,8 +9,24 @@ from typing import Any, Dict, List, Tuple
 from openjarvis.core.config import JarvisConfig
 from openjarvis.core.registry import EngineRegistry
 from openjarvis.engine._base import InferenceEngine
+from openjarvis.security.egress import LocalOnlyViolation
 
 logger = logging.getLogger(__name__)
+
+
+def _is_local_only(config: JarvisConfig) -> bool:
+    """Whether the runtime local-only guarantee is in effect."""
+    runtime = getattr(config, "runtime", None)
+    return bool(getattr(runtime, "local_only", False))
+
+
+def _engine_is_cloud(key: str) -> bool:
+    """Whether the registered engine *key* is a cloud backend."""
+    try:
+        return bool(getattr(EngineRegistry.get(key), "is_cloud", False))
+    except KeyError:
+        return False
+
 
 # Map registry keys to config host attribute (None = no host arg)
 _HOST_MAP: Dict[str, str | None] = {
@@ -32,8 +48,23 @@ _HOST_MAP: Dict[str, str | None] = {
 
 
 def _make_engine(key: str, config: JarvisConfig) -> InferenceEngine:
-    """Instantiate a registered engine with the appropriate config host."""
+    """Instantiate a registered engine with the appropriate config host.
+
+    Fail-closed chokepoint for the local-only guarantee: when
+    ``[runtime] local_only`` is on, cloud backends (``is_cloud``) are never
+    instantiated — a :class:`LocalOnlyViolation` is raised instead, so there is
+    no reachable code path that constructs a cloud client in airgap mode.
+    """
     cls = EngineRegistry.get(key)
+
+    if _is_local_only(config) and getattr(cls, "is_cloud", False):
+        raise LocalOnlyViolation(
+            f"Engine {key!r} is a cloud backend and is disabled because "
+            f"[runtime] local_only = true (the default). OpenJarvis will not "
+            f"fall back to the cloud. To use cloud engines, set "
+            f"OPENJARVIS_LOCAL_ONLY=0 or local_only = false in config "
+            f"(see configs/openjarvis/cloud.example.toml)."
+        )
 
     # gemma_cpp: pass config fields instead of host
     if key == "gemma_cpp":
@@ -175,6 +206,16 @@ def get_engine(
 
     def _usable(engine: InferenceEngine) -> bool:
         return engine.health() and (model is None or engine.can_serve(model))
+
+    # Fail closed (loudly) when a cloud engine is explicitly requested in
+    # local_only mode. Without this the caught-exception loop below would
+    # silently skip it and fall back to a local engine, hiding the policy.
+    if engine_key and _is_local_only(config) and _engine_is_cloud(engine_key):
+        raise LocalOnlyViolation(
+            f"Engine {engine_key!r} is a cloud backend and is disabled because "
+            f"[runtime] local_only = true. Set OPENJARVIS_LOCAL_ONLY=0 or "
+            f"local_only = false to use it."
+        )
 
     # Build an ordered list of keys to try, then fall back to full discovery.
     keys_to_try: list[str] = []

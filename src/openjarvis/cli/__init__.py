@@ -60,6 +60,27 @@ def cli(ctx: click.Context, verbose: bool, quiet: bool) -> None:
     ctx.obj["quiet"] = quiet
     setup_logging(verbose=verbose, quiet=quiet)
 
+    # Enforce the fully-local guarantee (airgap egress guard) for real CLI runs.
+    # When [runtime] local_only is on (the default), this installs the
+    # process-wide socket guard so no command can reach the public internet.
+    # Skipped under pytest so the global socket patch can't leak across tests;
+    # the guard mechanism is covered directly by tests/security/test_egress.py,
+    # and the engine-factory fail-closed path stays active regardless.
+    import sys as _sys
+
+    if "pytest" not in _sys.modules:
+        try:
+            from openjarvis.core.config import load_config
+            from openjarvis.security.egress import enforce_local_only
+
+            enforce_local_only(load_config())
+        except Exception:  # best-effort: never let the guard break the CLI
+            import logging as _logging
+
+            _logging.getLogger(__name__).debug(
+                "local_only egress guard not installed", exc_info=True
+            )
+
     # Check for updates on interactive commands. The banner is noise in
     # demo recordings of ``jarvis ask --research``, so skip it whenever
     # the research flag is in argv (cheap argv sniff — Click hasn't
