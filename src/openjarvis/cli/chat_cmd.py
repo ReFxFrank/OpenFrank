@@ -282,20 +282,24 @@ def chat(
         # Add user message
         history.append(Message(role=Role.USER, content=user_input))
 
-        # Generate response
+        # Generate response (spinner so it never looks frozen while the model
+        # — especially a reasoning model like qwen3 — is generating).
         try:
-            if agent is not None:
-                response = agent.run(user_input)
-                content = (
-                    response.content if hasattr(response, "content") else str(response)
-                )
-            else:
-                result = engine.generate(history, model=model)
-                content = (
-                    result.get("content", "")
-                    if isinstance(result, dict)
-                    else str(result)
-                )
+            with console.status("[bold cyan]Thinking…[/bold cyan]", spinner="dots"):
+                if agent is not None:
+                    response = agent.run(user_input)
+                    content = (
+                        response.content
+                        if hasattr(response, "content")
+                        else str(response)
+                    )
+                else:
+                    result = engine.generate(history, model=model)
+                    content = (
+                        result.get("content", "")
+                        if isinstance(result, dict)
+                        else str(result)
+                    )
 
             history.append(Message(role=Role.ASSISTANT, content=content))
             console.print()

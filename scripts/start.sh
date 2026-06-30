@@ -5,7 +5,7 @@
 #
 #   bash scripts/start.sh                 # interactive chat (default)
 #   bash scripts/start.sh ask "question" # one-shot question
-#   bash scripts/start.sh serve          # run the HTTP server / API
+#   bash scripts/start.sh serve          # web UI + API at http://127.0.0.1:8000
 #   bash scripts/start.sh doctor         # health check
 #   bash scripts/start.sh --pull-only    # just ensure Ollama + models, then exit
 #
@@ -88,7 +88,15 @@ case "$action" in
     ;;
   serve)
     ensure_models
-    log "Starting server (default http://127.0.0.1:8000)..."
+    # The web UI is served from src/openjarvis/server/static/ (Vite build
+    # output). Build it once if it isn't there so `serve` shows the UI, not a
+    # bare API. build-ui.sh installs a Linux Node if WSL only has Windows' one.
+    if [ ! -f "$REPO_ROOT/src/openjarvis/server/static/index.html" ]; then
+      log "Web UI not built yet — building it once (this can take a minute)..."
+      bash "$REPO_ROOT/scripts/build-ui.sh" ||
+        warn "UI build failed; serving the API only. See: bash scripts/build-ui.sh"
+    fi
+    log "Starting server (open http://127.0.0.1:8000)..."
     exec uv run jarvis serve
     ;;
   ask)

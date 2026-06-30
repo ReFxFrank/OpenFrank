@@ -26,6 +26,11 @@ bash scripts/start.sh                   # launches the assistant (interactive ch
 step-by-step below explains what those scripts do and how to configure things;
 read on if you want the details or are on native Windows.
 
+**Want the graphical web UI instead of the terminal?** Run `bash scripts/start.sh
+serve` and open <http://127.0.0.1:8000>. The first `serve` builds the UI for you
+(installing a Linux Node if WSL only has the Windows one — see §11); after that
+it's instant.
+
 ---
 
 ## 1. Install
@@ -294,3 +299,66 @@ bash scripts/start.sh chat --speak       # or: uv run jarvis chat --speak
   `sudo apt-get install -y pulseaudio-utils` (gives `paplay`). If no player is
   found, the reply is still synthesized to a `.wav` and its path is logged, so
   nothing breaks.
+
+---
+
+## 11. Web UI (browser chat + dashboard)
+
+OpenFrank ships a React UI (chat, dashboard, agents, settings, logs). It's
+served by the API server itself — no separate process — so the easiest path is:
+
+```bash
+bash scripts/start.sh serve          # builds the UI the first time, then serves
+# open http://127.0.0.1:8000
+```
+
+Under the hood `serve` runs `scripts/build-ui.sh`, which builds the frontend
+straight into `src/openjarvis/server/static/` (where the server mounts it). To
+build it by hand (or rebuild after pulling changes):
+
+```bash
+bash scripts/build-ui.sh             # install Node (if needed) + npm ci + build
+```
+
+### The WSL2 "UNC paths are not supported" trap
+
+If you `cd frontend && npm install` inside WSL and see:
+
+```
+npm error command C:\Windows\system32\cmd.exe /d /s /c node install.js
+npm error UNC paths are not supported.  Defaulting to Windows directory.
+npm error Node.js v24.16.0
+```
+
+…that's **Windows' Node running on your WSL files**. WSL inherits the Windows
+`PATH`, so with no Linux Node installed, `node`/`npm` resolve to the Windows
+binaries under `/mnt/c/…`. They can't operate on `\\wsl.localhost\…` UNC paths
+and abort. The fix is to install Node *inside* WSL:
+
+```bash
+# NodeSource LTS (what build-ui.sh does for you):
+curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# then, from a fresh shell, confirm it's the Linux one (NOT under /mnt/c):
+which node            # → /usr/bin/node
+node --version        # → v20+ or v22+
+
+# wipe the half-written Windows install and rebuild:
+cd ~/openfrank/frontend && rm -rf node_modules
+bash ~/openfrank/scripts/build-ui.sh
+```
+
+`build-ui.sh` detects the Windows-Node case automatically and installs the Linux
+one, so you normally don't need to do this by hand.
+
+### Dev mode (hot reload, optional)
+
+Only if you're editing the UI: run the API and the Vite dev server side by side
+(needs Linux Node, as above).
+
+```bash
+uv run jarvis serve                  # backend on :8000
+cd frontend && npm run dev           # Vite dev server on :5173 (proxies to :8000)
+# open http://localhost:5173
+```
