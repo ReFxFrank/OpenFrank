@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from typing import List, Optional
 
@@ -14,6 +15,8 @@ from openjarvis.core.config import load_config
 from openjarvis.core.events import EventBus
 from openjarvis.core.types import Message, Role
 from openjarvis.memory import publish_completed_exchange
+
+logger = logging.getLogger(__name__)
 
 
 def _read_input(prompt: str = "You> ") -> Optional[str]:
@@ -39,6 +42,20 @@ def _read_input(prompt: str = "You> ") -> Optional[str]:
         "(overrides config). Pass 'none' to disable all persona files."
     ),
 )
+@click.option(
+    "--speak/--no-speak",
+    default=False,
+    help="Speak each reply aloud with a local TTS voice (Kokoro).",
+)
+@click.option(
+    "--voice", default="", help="TTS voice id (backend-specific; blank = default)."
+)
+@click.option(
+    "--tts-backend",
+    "tts_backend",
+    default="kokoro",
+    help="TTS backend: kokoro (local), cartesia, openai_tts.",
+)
 def chat(
     engine_key: str | None,
     model_name: str | None,
@@ -46,6 +63,9 @@ def chat(
     tools: str | None,
     system_prompt: str | None,
     persona_name: str | None,
+    speak: bool,
+    voice: str,
+    tts_backend: str,
 ) -> None:
     """Start an interactive multi-turn chat session.
 
@@ -281,6 +301,22 @@ def chat(
             console.print()
             console.print(Markdown(content))
             console.print()
+
+            if speak and content.strip():
+                try:
+                    from openjarvis.speech.speak import speak as _speak_reply
+
+                    if (
+                        _speak_reply(content, backend_name=tts_backend, voice_id=voice)
+                        is None
+                    ):
+                        console.print(
+                            "[dim](voice unavailable — install with "
+                            "`uv pip install kokoro soundfile`; on WSL2 audio "
+                            "needs WSLg)[/dim]"
+                        )
+                except Exception as exc:  # never let TTS break the chat
+                    logger.debug("speak failed: %s", exc)
 
             publish_completed_exchange(
                 bus,

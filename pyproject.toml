@@ -137,6 +137,9 @@ sandbox-docker = ["docker>=7.0"]
 dashboard = ["textual>=0.80"]
 speech = ["faster-whisper>=1.0"]
 speech-deepgram = ["deepgram-sdk>=3.0"]
+# Local text-to-speech voice (Kokoro). soundfile writes the wav; kokoro pulls
+# torch, so this is a heavy, opt-in extra. `jarvis chat --speak` uses it.
+speech-tts = ["kokoro>=0.9.4", "soundfile>=0.12.1"]
 eval-wandb = ["wandb>=0.17"]
 eval-sheets = ["gspread>=6.0", "google-auth>=2.0"]
 mining-pearl-cpu = [

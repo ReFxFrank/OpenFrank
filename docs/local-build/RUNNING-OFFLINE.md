@@ -272,3 +272,25 @@ headroom guarantee is auditable, not just asserted.
   the budget automatically.
 - In `cpu_only` the assistant runs entirely on the 64 GB of DDR5 — slower, but it
   never touches the card a game is using and never OOMs it.
+
+---
+
+## 10. Voice — speak replies aloud (local TTS)
+
+The assistant can speak its replies with a **fully-local** voice (Kokoro), so it
+works under `local_only` with no cloud TTS:
+
+```bash
+uv pip install kokoro soundfile          # or: uv sync --extra speech-tts
+bash scripts/start.sh chat --speak       # or: uv run jarvis chat --speak
+```
+
+- `--tts-backend kokoro` (default, local) · `cartesia` / `openai_tts` are cloud
+  and are blocked under `local_only`.
+- `--voice af_bella` picks a voice (Kokoro: `af_heart` default, `af_bella`,
+  `am_michael`, …); blank uses the backend default.
+- **WSL2 audio:** playback needs an audio bridge. On Windows 11, WSLg provides
+  PulseAudio automatically — install the player with
+  `sudo apt-get install -y pulseaudio-utils` (gives `paplay`). If no player is
+  found, the reply is still synthesized to a `.wav` and its path is logged, so
+  nothing breaks.
