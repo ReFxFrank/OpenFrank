@@ -26,10 +26,19 @@ export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 command -v uv >/dev/null 2>&1 ||
   { warn "uv not found — run: bash scripts/install/setup-wsl.sh"; exit 1; }
 
-# The native extension is mandatory (security paths). Fail early with a hint.
+# The native extension is mandatory (security paths). If a `uv sync` pruned it
+# (uv defaults to --exact), rebuild it on the spot when the toolchain is present
+# instead of dead-ending — only hint at full setup when maturin/Rust is missing.
+RUST_MANIFEST="$REPO_ROOT/rust/crates/openjarvis-python/Cargo.toml"
 if ! uv run python -c "import openjarvis_rust" >/dev/null 2>&1; then
-  warn "Native extension not built — run: bash scripts/install/setup-wsl.sh"
-  exit 1
+  if uv run maturin --version >/dev/null 2>&1; then
+    log "Native extension missing — building it once (a few minutes)..."
+    uv run maturin develop --release --manifest-path "$RUST_MANIFEST" ||
+      { warn "native build failed — run: bash scripts/install/setup-wsl.sh"; exit 1; }
+  else
+    warn "Native extension not built — run: bash scripts/install/setup-wsl.sh"
+    exit 1
+  fi
 fi
 
 OLLAMA_URL="${OLLAMA_HOST:-http://127.0.0.1:11434}"
@@ -73,6 +82,16 @@ ensure_models() {
   done
 }
 
+ensure_server_deps() {
+  # `serve` needs fastapi/uvicorn (the `server` extra). Install on demand with
+  # --inexact so it never prunes the native extension or other installed extras
+  # (the bug that made setup loop: `uv sync --extra server` evicted the rest).
+  if uv run python -c "import fastapi, uvicorn" >/dev/null 2>&1; then return 0; fi
+  log "Installing server dependencies (fastapi/uvicorn)..."
+  uv sync --inexact --extra server ||
+    warn "could not install server deps; 'serve' may fail. Try: uv sync --inexact --extra server"
+}
+
 ensure_ollama || exit 1
 
 action="${1:-chat}"
@@ -88,6 +107,7 @@ case "$action" in
     ;;
   serve)
     ensure_models
+    ensure_server_deps
     # The web UI is served from src/openjarvis/server/static/ (Vite build
     # output). Build it once if it isn't there so `serve` shows the UI, not a
     # bare API. build-ui.sh installs a Linux Node if WSL only has Windows' one.

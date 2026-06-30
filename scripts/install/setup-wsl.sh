@@ -86,7 +86,14 @@ fi
 # --- 5. build OpenFrank ----------------------------------------------------
 cd "$REPO_ROOT"
 log "Installing Python dependencies (uv sync)..."
-uv sync --extra dev --extra memory-sqlite-vec --extra memory-faiss --extra gpu-metrics
+# One environment with everything the assistant needs at runtime (server UI +
+# memory + GPU metrics) AND the build toolchain (dev → maturin). --inexact is
+# critical: uv defaults to --exact, which would PRUNE the maturin-built
+# openjarvis_rust and evict the server/dev extras from each other on every
+# re-run. --inexact keeps already-installed packages in place.
+uv sync --inexact \
+  --extra dev --extra server \
+  --extra memory-sqlite-vec --extra memory-faiss --extra gpu-metrics
 log "Building the native Rust extension with --release (takes a few minutes)..."
 uv run maturin develop --release \
   --manifest-path rust/crates/openjarvis-python/Cargo.toml

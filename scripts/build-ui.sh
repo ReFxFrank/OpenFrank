@@ -85,9 +85,12 @@ cd "$FRONTEND"
 
 # A node_modules left behind by Windows npm is half-written (EPERM on cleanup);
 # wipe it so the Linux install starts clean. --clean forces this regardless.
+# Files written by Windows npm onto the WSL FS can carry perms the Linux user
+# can't clear, so fall back to sudo when a plain rm is denied.
 if [ "$CLEAN" = "1" ] || [ -d node_modules ]; then
   log "Removing existing node_modules (stale / Windows-written)..."
-  rm -rf node_modules
+  rm -rf node_modules 2>/dev/null || sudo rm -rf node_modules ||
+    die "could not remove node_modules — run: sudo rm -rf '$FRONTEND/node_modules'"
 fi
 
 log "Installing JS dependencies (npm)..."
