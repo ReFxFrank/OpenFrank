@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -16,6 +17,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from openjarvis.core.events import EventBus, EventType
 from openjarvis.core.types import ToolCall, ToolResult
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # ToolSpec — metadata describing a tool's interface
@@ -107,6 +110,7 @@ class ToolExecutor:
         capability_policy: Optional[Any] = None,
         agent_id: str = "",
         boundary_guard: Optional[Any] = None,
+        local_only: bool = False,
     ) -> None:
         self._tools: Dict[str, BaseTool] = {t.spec.name: t for t in tools}
         self._bus = bus
@@ -116,6 +120,10 @@ class ToolExecutor:
         self._capability_policy = capability_policy
         self._agent_id = agent_id
         self._boundary_guard = boundary_guard
+        # Airgap gate: in local_only, refuse tools that reach the network (the
+        # same egress surface the Phase 1 socket guard fences off). Skills run
+        # through this dispatcher, so a network-requiring skill is blocked here.
+        self._local_only = local_only
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
         """Parse arguments, dispatch to tool, measure latency, emit events."""
@@ -176,6 +184,45 @@ class ToolExecutor:
                         ),
                         success=False,
                     )
+
+        # local_only airgap gate: block tools (and therefore skills) that reach
+        # the network, and log the block. This is the capability-level companion
+        # to the Phase 1 socket egress guard.
+        if self._local_only and tool.spec.required_capabilities:
+            from openjarvis.security.capabilities import (
+                NETWORK_CAPABILITIES,
+                requires_network,
+            )
+
+            if requires_network(tool.spec.required_capabilities):
+                net = [
+                    c
+                    for c in tool.spec.required_capabilities
+                    if c in NETWORK_CAPABILITIES
+                ]
+                logger.warning(
+                    "local_only: blocked network tool %r (capabilities=%s)",
+                    tool_call.name,
+                    net,
+                )
+                if self._bus:
+                    self._bus.publish(
+                        EventType.SECURITY_BLOCK,
+                        {
+                            "reason": "local_only",
+                            "tool": tool_call.name,
+                            "capabilities": net,
+                        },
+                    )
+                return ToolResult(
+                    tool_name=tool_call.name,
+                    content=(
+                        f"Tool '{tool_call.name}' is disabled in local_only mode "
+                        f"because it requires network access ({', '.join(net)}). "
+                        f"Set OPENJARVIS_LOCAL_ONLY=0 to allow it."
+                    ),
+                    success=False,
+                )
 
         # Taint checking (sink policy)
         taint_set = params.get("_taint") if isinstance(params, dict) else None

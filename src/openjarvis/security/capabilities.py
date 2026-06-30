@@ -28,6 +28,27 @@ class Capability(str, Enum):
     SYSTEM_ADMIN = "system:admin"
 
 
+# Capabilities that imply reaching the (public) network. In ``local_only`` mode
+# tools/skills requiring any of these are blocked — they are the egress surface
+# the airgap guard exists to fence off. ``channel:send`` is included because
+# delivering to a remote channel is outbound egress too.
+NETWORK_CAPABILITIES: frozenset[str] = frozenset(
+    {
+        Capability.NETWORK_FETCH.value,  # "network:fetch"
+        "network:listen",
+        "network:connect",
+        Capability.CHANNEL_SEND.value,  # "channel:send"
+    }
+)
+
+
+def requires_network(capabilities: object) -> bool:
+    """Return True if any capability in *capabilities* implies network egress."""
+    if not capabilities:
+        return False
+    return any(cap in NETWORK_CAPABILITIES for cap in capabilities)
+
+
 @dataclass(slots=True)
 class CapabilityGrant:
     """A single capability grant for an agent."""
@@ -171,6 +192,8 @@ class CapabilityPolicy:
 DEFAULT_TOOL_CAPABILITIES: Dict[str, List[str]] = {
     "file_read": [Capability.FILE_READ],
     "web_search": [Capability.NETWORK_FETCH],
+    "http_request": [Capability.NETWORK_FETCH],
+    "browser": [Capability.NETWORK_FETCH],
     "code_interpreter": [Capability.CODE_EXECUTE],
     "memory_store": [Capability.MEMORY_WRITE],
     "memory_retrieve": [Capability.MEMORY_READ],
@@ -187,4 +210,6 @@ __all__ = [
     "CapabilityGrant",
     "CapabilityPolicy",
     "DEFAULT_TOOL_CAPABILITIES",
+    "NETWORK_CAPABILITIES",
+    "requires_network",
 ]

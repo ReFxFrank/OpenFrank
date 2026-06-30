@@ -11,6 +11,56 @@ VRAM split) are recorded as targets to re-measure on the real rig — see
 
 ---
 
+## Phase 4 — Skills & tools expansion (local-capable, egress-gated)
+
+**Goal:** a curated set of local-capable skills, with `local_only` enforcing that
+no skill reaches the network (cloud-requiring skills marked + disabled by
+default), and hardened skill loading.
+
+> The skills system already shipped 20 bundled skills, a capability model
+> (`required_capabilities`, `DANGEROUS_CAPABILITIES`, trust tiers), strict
+> manifest validation, and a regex-placeholder template renderer (no eval/exec).
+> So this phase **adds the local_only enforcement layer** and audits the rest.
+
+- **Network capability model (`security/capabilities.py`).** New
+  `NETWORK_CAPABILITIES` set + `requires_network()`. Added `http_request` and
+  `browser` to `DEFAULT_TOOL_CAPABILITIES` so the network surface is complete
+  (`web_search`/`http_request`/`browser` → `network:fetch`; `channel:send` is
+  also egress).
+
+- **Skill network classification (`skills/security.py`).** A skill's network
+  surface comes from the *tools its steps invoke*, not just declared
+  capabilities, so `skill_network_capabilities()` / `skill_requires_network()`
+  inspect both (live `ToolSpec`s, falling back to the static table).
+  `partition_local_safe()` splits skills into local-safe vs network-requiring.
+  On the 20 bundled skills this flags exactly the 3 that reach out
+  (`web-summarize`, `topic-research`, `dependency-audit`); the other 17 are
+  local-safe and stay discoverable.
+
+- **ToolExecutor airgap gate (`tools/_stubs.py`).** New `local_only` flag (off by
+  default): in local_only the dispatcher refuses any tool requiring a network
+  capability and logs a `SECURITY_BLOCK` event. Skills run through the
+  dispatcher, so a network-requiring skill is blocked **and logged** here — the
+  capability-level companion to the Phase 1 socket egress guard. Wired from
+  `runtime.local_only` in `system/builder.py`.
+
+- **Hardening audit.** Confirmed skill execution cannot run arbitrary code: the
+  template renderer is a `\{(\w+)\}` regex substitution (no `eval`/`exec`/`format`
+  injection) and `skills/parser.py` enforces required-field, length, and naming
+  validation. No changes needed; documented here.
+
+- **Tests (13):** `tests/security/test_capabilities_network.py`,
+  `tests/skills/test_local_only_skills.py` (classification on the real bundled
+  skills + that the curated local set stays discoverable),
+  `tests/tools/test_tool_executor_local_only.py` (network tool blocked + logged
+  in local_only; local tool allowed; default executor ungated).
+
+**Verification:** security + skills + tools = 1246 passed, 0 new failures (the 2
+web-search failures are the pre-existing missing-key environmental ones); ruff
+clean; classification verified against the 20 bundled skills.
+
+---
+
 ## Phase 3 — Memory & RAG upgrade (all offline)
 
 **Goal:** add a persistent local vector store, a local reranker with a relevance
