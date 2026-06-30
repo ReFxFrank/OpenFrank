@@ -185,7 +185,50 @@ jarvis ask "summarize my notes on X"   # routed, local, GPU-backed
 
 ---
 
-## 7. Keep the GPU free while gaming
+## 7. Self-improvement (local learning loop)
+
+OpenJarvis can optimize its own skill prompts from your local traces — fully
+local, GPU-idle-scheduled, and reversible.
+
+```bash
+# On-demand (snapshots overlays first, so it's undoable):
+jarvis optimize skills --policy dspy
+
+# Scheduled / nightly: only runs when the GPU is idle (won't fight your games):
+jarvis optimize skills --policy dspy --require-idle
+
+# Inspect and undo:
+jarvis optimize snapshots                 # list overlay snapshots
+jarvis optimize rollback <snapshot_id>    # restore a previous state
+```
+
+```toml
+[optimize]
+snapshot = true          # snapshot overlays before every run (reversible)
+require_idle = true      # only run when the GPU is free
+auto_rollback = true     # undo a run that regresses the benchmark
+keep_threshold = 0.0     # min bench gain required to keep a run
+local_optimizer_model = "qwen3:14b"   # local optimizer LM (cloud would fail closed)
+```
+
+**Nightly schedule (idle time).** Run it when you're asleep and the GPU is free.
+Native Windows (Task Scheduler):
+```powershell
+schtasks /create /tn "jarvis-optimize" /tr "jarvis optimize skills --require-idle" /sc daily /st 03:00
+```
+WSL2 / Linux (cron): `0 3 * * * jarvis optimize skills --require-idle`.
+
+Prove the gain with the benchmark, before and after:
+```bash
+jarvis bench skills --condition skills_on --max-samples 50
+jarvis bench skills --condition skills_optimized_dspy --max-samples 50
+```
+With `auto_rollback`, a run that doesn't beat the baseline is reverted
+automatically; either way a snapshot is kept so you can roll back by hand.
+
+---
+
+## 8. Keep the GPU free while gaming
 
 - Set `[offload] profile = "gaming"` (or `cpu_only`) before launching a game, or
   leave `profile = "auto"` and the planner will detect the busy GPU and shrink

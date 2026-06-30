@@ -1468,6 +1468,19 @@ class OptimizeConfig:
     judge_model: str = "gpt-5-mini-2025-08-07"
     db_path: str = field(default_factory=lambda: str(get_config_dir() / "optimize.db"))
 
+    # Phase 5 learning-loop guardrails (all local, reversible).
+    # Snapshot overlays before every run so a run is always undoable.
+    snapshot: bool = True
+    # Only run when the GPU is idle, so optimization never fights the user.
+    require_idle: bool = True
+    # Roll back automatically when the after-benchmark regresses.
+    auto_rollback: bool = True
+    # Minimum benchmark improvement required to keep a run's overlays.
+    keep_threshold: float = 0.0
+    # Local optimizer model used in local_only mode (a hosted optimizer_model
+    # would fail closed under the Phase 1 lockdown).
+    local_optimizer_model: str = "qwen3:14b"
+
 
 @dataclass(slots=True)
 class AgentManagerConfig:

@@ -452,7 +452,26 @@ def optimize_personal(action: str, workflow: str, trials: int) -> None:
     default=False,
     help="Show planned work without invoking the optimizer LM.",
 )
-def skills(policy: str, min_traces: int, dry_run: bool) -> None:
+@click.option(
+    "--snapshot/--no-snapshot",
+    "do_snapshot",
+    default=True,
+    show_default=True,
+    help="Snapshot overlays before optimizing (so the run is reversible).",
+)
+@click.option(
+    "--require-idle/--no-require-idle",
+    default=False,
+    show_default=True,
+    help="Only run when the GPU is idle (for scheduled/nightly runs).",
+)
+def skills(
+    policy: str,
+    min_traces: int,
+    dry_run: bool,
+    do_snapshot: bool,
+    require_idle: bool,
+) -> None:
     """Optimize per-skill descriptions and few-shot examples from traces."""
     from rich.console import Console
     from rich.table import Table
@@ -462,6 +481,17 @@ def skills(policy: str, min_traces: int, dry_run: bool) -> None:
     from openjarvis.skills.manager import SkillManager
 
     console = Console()
+
+    # Idle gate: don't fight the user for the GPU on scheduled runs.
+    if require_idle and not dry_run:
+        from openjarvis.learning.optimize.idle import gpu_is_idle
+
+        if not gpu_is_idle():
+            console.print(
+                "[yellow]GPU is busy — skipping optimization (--require-idle).[/yellow]"
+            )
+            return
+
     store = _get_trace_store()
     if store is None:
         console.print("[red]No trace store found. Enable tracing first.[/red]")
@@ -489,7 +519,17 @@ def skills(policy: str, min_traces: int, dry_run: bool) -> None:
         console.print(table)
         return
 
-    # Real run
+    # Real run — snapshot overlays first so the run is reversible.
+    if do_snapshot:
+        from openjarvis.learning.optimize.snapshot import create_snapshot
+
+        snap = create_snapshot(label=f"optimize-skills-{policy}")
+        console.print(
+            f"[dim]Snapshot {snap.snapshot_id} taken "
+            f"({snap.file_count} overlay file(s)); "
+            f"roll back with `jarvis optimize rollback {snap.snapshot_id}`.[/dim]"
+        )
+
     mgr = SkillManager(bus=EventBus())
     mgr.discover()
     optimizer = SkillOptimizer(min_traces_per_skill=min_traces, optimizer=policy)
@@ -508,6 +548,58 @@ def skills(policy: str, min_traces: int, dry_run: bool) -> None:
         path_str = str(res.overlay_path) if res.overlay_path else "—"
         table.add_row(name, res.status, str(res.trace_count), path_str)
     console.print(table)
+
+
+@optimize_group.command("snapshot")
+@click.option("--label", "-l", default="", help="Optional label for the snapshot.")
+def optimize_snapshot(label: str) -> None:
+    """Snapshot the current skill-optimization overlays (for later rollback)."""
+    from openjarvis.learning.optimize.snapshot import create_snapshot
+
+    console = Console()
+    snap = create_snapshot(label=label)
+    console.print(
+        f"[green]Snapshot created:[/green] {snap.snapshot_id} "
+        f"({snap.file_count} overlay file(s)) at {snap.path}"
+    )
+
+
+@optimize_group.command("snapshots")
+def optimize_snapshots() -> None:
+    """List skill-optimization overlay snapshots (newest first)."""
+    from openjarvis.learning.optimize.snapshot import list_snapshots
+
+    console = Console()
+    snaps = list_snapshots()
+    if not snaps:
+        console.print("[dim]No snapshots yet.[/dim]")
+        return
+    table = Table(title="Optimization snapshots")
+    table.add_column("ID", style="cyan")
+    table.add_column("Created")
+    table.add_column("Files")
+    table.add_column("Label")
+    for s in snaps:
+        table.add_row(s.snapshot_id, s.created_at, str(s.file_count), s.label or "—")
+    console.print(table)
+
+
+@optimize_group.command("rollback")
+@click.argument("snapshot_id")
+def optimize_rollback(snapshot_id: str) -> None:
+    """Restore skill overlays from a snapshot (undo an optimization run)."""
+    from openjarvis.learning.optimize.snapshot import rollback
+
+    console = Console()
+    try:
+        snap = rollback(snapshot_id)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1) from exc
+    console.print(
+        f"[green]Rolled back[/green] overlays to snapshot {snap.snapshot_id} "
+        f"({snap.file_count} file(s))."
+    )
 
 
 __all__ = ["optimize_group"]

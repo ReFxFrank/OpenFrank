@@ -11,6 +11,60 @@ VRAM split) are recorded as targets to re-measure on the real rig — see
 
 ---
 
+## Phase 5 — Activate the learning loop (local, reversible, idle-scheduled)
+
+**Goal:** run the existing DSPy skill optimization on local traces with hard
+guardrails — snapshot/rollback, GPU-idle scheduling, and before/after benchmark
+gating — so a run produces a measurable lift, cleanly no-ops with a report, or is
+rolled back.
+
+> `jarvis optimize skills --policy dspy/gepa` and `jarvis bench skills` already
+> existed (optimization writes per-skill *overlays* under
+> `~/.openjarvis/learning/skills/`). This phase wraps them in the guardrails.
+
+- **Snapshot / rollback (`learning/optimize/snapshot.py`).** Copies the overlay
+  tree to `~/.openjarvis/learning/snapshots/<id>/` with a `meta.json`.
+  `create_snapshot` / `list_snapshots` / `get_snapshot` / `rollback`. Snapshotting
+  an empty overlay tree is valid — rolling back to it removes overlays created
+  since, so "no overlays" is itself a restorable state. Pure-local, no external
+  state.
+
+- **GPU-idle gate (`learning/optimize/idle.py`).** `gpu_is_idle()` reuses the
+  Phase 2 live VRAM reader: idle = ≥80% VRAM free; a GPU-less box counts as idle
+  (a CPU run won't fight the user for the card). So nightly runs never compete
+  with a game.
+
+- **Guarded run harness (`learning/optimize/guarded.py`).**
+  `run_guarded_optimization(optimize_fn, bench_fn=…)` does: idle-gate → snapshot
+  → benchmark-before → optimize → benchmark-after → **keep if improved by
+  `keep_threshold`, else roll back**. No traces/changes → clean no-op report.
+  No benchmark → keep but snapshot (manual rollback available). `optimize_fn`/
+  `bench_fn` are injected, so the whole control flow is unit-tested offline
+  without DSPy or a running engine.
+
+- **CLI.** New `jarvis optimize snapshot` / `snapshots` / `rollback <id>`.
+  `optimize skills` now snapshots overlays before a real run (`--snapshot`,
+  default on) and honours `--require-idle` for scheduled runs.
+
+- **Config.** `OptimizeConfig` gains `snapshot`, `require_idle`, `auto_rollback`,
+  `keep_threshold`, and `local_optimizer_model` (a hosted `optimizer_model` would
+  fail closed under the Phase 1 lockdown, so local_only needs a local LM).
+
+- **Docs.** `RUNNING-OFFLINE.md` §7: on-demand vs nightly (Task Scheduler / cron)
+  optimization, snapshot/rollback, and before/after benchmarking.
+
+- **Tests (20):** `tests/learning/optimize/{test_snapshot,test_guarded,test_idle}.py`
+  + `tests/cli/test_optimize_snapshot_cmd.py` — snapshot round-trip + restore,
+  idle gating, keep-on-improve / rollback-on-regress / clean no-op, and the CLI
+  snapshot→list→rollback flow.
+
+**Verification:** Phase 5 suites = 20 passed; learning + cli = no new failures
+(the 10 remaining cli failures are the pre-existing version-banner ones); ruff
+clean. Real DSPy optimization + PinchBench need the rig + Ollama; the guardrail
+control flow that wraps them is fully proven here.
+
+---
+
 ## Phase 4 — Skills & tools expansion (local-capable, egress-gated)
 
 **Goal:** a curated set of local-capable skills, with `local_only` enforcing that
