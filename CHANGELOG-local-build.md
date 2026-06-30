@@ -11,6 +11,45 @@ VRAM split) are recorded as targets to re-measure on the real rig — see
 
 ---
 
+## Phase 6 — Security hardening (malformed-hex / signature panic DoS)
+
+**Goal:** fix the known malformed-hex / signature-verification panic in the Rust
+path — validate input and return an error instead of panicking; add a regression
+test with malformed input.
+
+- **Root cause.** `rust/crates/openjarvis-skills/src/lib.rs::decode_hex` decoded
+  the manifest's hex `signature` by slicing the `&str` by byte index
+  (`s[i..i + 2]`). A signature containing a multi-byte UTF-8 codepoint (e.g.
+  `"aéb"`, 4 bytes) makes an index land *inside* a codepoint, so Rust panics
+  with "byte index N is not a char boundary". The `signature` field is
+  attacker-controlled (it comes straight from a loaded skill manifest), and the
+  panic crosses the PyO3 boundary as `pyo3_runtime.PanicException` — a
+  `BaseException` that ordinary `except Exception` handlers do **not** catch.
+  That is a denial-of-service vector reachable from the exposed
+  `openjarvis_rust.load_skill(...).verify_signature(...)` API. (The sibling
+  `parse_public_key_hex` in `skills.rs` was already hardened; `decode_hex` was
+  the remaining hole, and `security/signing.py` uses base64, so it is unaffected.)
+
+- **Fix.** `decode_hex` now operates on the byte slice and never slices the
+  `&str`: it rejects non-ASCII input up front and decodes via `chunks_exact(2)` +
+  `to_digit(16)`, returning `Err` for odd-length / non-ASCII / non-hex input. No
+  input can panic. Public behaviour is unchanged for valid hex.
+
+- **Tests.**
+  - Rust (`openjarvis-skills`): `decode_hex` valid round-trip, odd/non-hex
+    rejection, and **multi-byte UTF-8 rejection without panic**; plus an
+    end-to-end `verify_signature` test with a *valid* key and a malformed
+    multi-byte signature (so the decode path the bug lived in is exercised).
+  - Python (`tests/skills/test_signature_dos.py`): drives the PyO3
+    `verify_signature` path with the RFC 8032 Test-1 public key and a battery of
+    malformed signatures, asserting `False` and no exception.
+
+**Verification:** `cargo test -p openjarvis-skills` → 8 passed; `cargo fmt`
+clean; rebuilt `openjarvis_rust`; `tests/skills` → 277 passed, DoS regression →
+8 passed.
+
+---
+
 ## Phase 1 — Fully-local lockdown (airgap mode)
 
 **Goal:** make "fully local" a *hard guarantee* instead of a default — no cloud

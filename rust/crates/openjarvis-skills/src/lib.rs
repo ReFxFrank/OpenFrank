@@ -5,13 +5,28 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 fn decode_hex(s: &str) -> Result<Vec<u8>, String> {
-    if !s.len().is_multiple_of(2) {
+    // Operate on bytes; never slice the &str. The previous implementation sliced
+    // `s[i..i + 2]` by byte index, which panics with "byte index N is not a char
+    // boundary" whenever an index lands inside a multi-byte UTF-8 codepoint
+    // (e.g. an attacker-controlled signature like "aéb"). That panic crosses the
+    // PyO3 boundary as a PanicException — a BaseException that ordinary
+    // `except Exception` handlers do not catch — i.e. a denial-of-service vector.
+    // Rejecting non-ASCII up front makes the rejection explicit and guarantees
+    // every byte below is a single-byte ASCII char.
+    if !s.is_ascii() {
+        return Err("non-ASCII hex string".into());
+    }
+    let bytes = s.as_bytes();
+    if !bytes.len().is_multiple_of(2) {
         return Err("odd-length hex string".into());
     }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
-        .collect()
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    for pair in bytes.chunks_exact(2) {
+        let hi = (pair[0] as char).to_digit(16).ok_or("invalid hex digit")?;
+        let lo = (pair[1] as char).to_digit(16).ok_or("invalid hex digit")?;
+        out.push((hi * 16 + lo) as u8);
+    }
+    Ok(out)
 }
 
 /// A single step within a skill: invoke a tool with templated arguments.
@@ -145,6 +160,51 @@ output_key = "result"
     fn test_verify_signature_bad_key() {
         let m = load_skill(SKILL_TOML).unwrap();
         assert!(!verify_signature(&m, &[0u8; 32]));
+    }
+
+    #[test]
+    fn decode_hex_valid_roundtrip() {
+        assert_eq!(decode_hex("0a1bFF").unwrap(), vec![0x0a, 0x1b, 0xff]);
+        assert_eq!(decode_hex("").unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn decode_hex_rejects_odd_and_nonhex() {
+        assert!(decode_hex("abc").is_err()); // odd length
+        assert!(decode_hex("zz").is_err()); // non-hex digits
+        assert!(decode_hex("0g").is_err());
+    }
+
+    #[test]
+    fn decode_hex_rejects_multibyte_utf8_without_panic() {
+        // Regression (DoS): the pre-fix implementation sliced `s[i..i + 2]` by
+        // byte index, so a string whose bytes split a multi-byte UTF-8 codepoint
+        // panicked with "byte index N is not a char boundary". These inputs all
+        // have even byte length and would have panicked; they must now return
+        // Err cleanly.
+        assert!(decode_hex("é").is_err()); // 2 bytes
+        assert!(decode_hex("aéb").is_err()); // 4 bytes, splits 'é'
+        assert!(decode_hex("🦀").is_err()); // 4 bytes
+        assert!(decode_hex("aa🦀").is_err()); // 6 bytes
+    }
+
+    #[test]
+    fn verify_signature_does_not_panic_on_malformed_signature() {
+        // End-to-end: a *valid* verifying key but an attacker-controlled,
+        // multi-byte signature string must return false (not panic). This
+        // exercises the decode_hex call inside verify_signature, which the
+        // pre-fix code could only reach after the key validated.
+        use ed25519_dalek::SigningKey;
+
+        let sk = SigningKey::from_bytes(&[7u8; 32]);
+        let vk = sk.verifying_key();
+
+        let mut manifest = load_skill(SKILL_TOML).unwrap();
+        manifest.signature = "aéb".into(); // would panic pre-fix
+        assert!(!verify_signature(&manifest, vk.as_bytes()));
+
+        manifest.signature = "🦀🦀🦀🦀".into();
+        assert!(!verify_signature(&manifest, vk.as_bytes()));
     }
 
     #[test]
