@@ -442,6 +442,7 @@ def _print_profile(
     model_name: str,
     console: Console,
     complexity_result=None,
+    route_decision=None,
 ) -> None:
     """Print an inference telemetry profile table from EventBus history."""
     # Collect all INFERENCE_END events (agents may fire multiple)
@@ -508,6 +509,24 @@ def _print_profile(
         _row("Complexity score", f"{complexity_result.score:.3f}")
         _row("Complexity tier", complexity_result.tier)
         _row("Suggested max tokens", str(complexity_result.suggested_max_tokens))
+        _row("", "")  # separator
+
+    if route_decision is not None:
+        plan = route_decision.offload
+        _row("Routed tier", route_decision.tier.value)
+        if route_decision.downgraded:
+            _row(
+                "Requested tier", f"{route_decision.requested_tier.value} (downgraded)"
+            )
+        _row("Offload profile", route_decision.profile.value)
+        split = (
+            "cpu-only"
+            if plan.cpu_only
+            else f"{plan.num_gpu}/{plan.total_layers} layers GPU "
+            f"({plan.gpu_fraction:.0%})"
+        )
+        _row("GPU/CPU split", split)
+        _row("VRAM budget", f"{plan.budget_gb:.1f} GB")
         _row("", "")  # separator
 
     _row("Wall time", f"{wall_seconds:.3f} s")
@@ -730,8 +749,10 @@ def ask(
                 '`--agent ""` to use vision.'
             )
 
-    # Track whether the user explicitly set --max-tokens
+    # Track whether the user explicitly set --max-tokens / --model. The tier
+    # router only overrides these when the user did NOT pin them.
     user_set_max_tokens = max_tokens is not None
+    user_set_model = model_name is not None
 
     # Fall back to config values for generation params
     if temperature is None:
@@ -831,6 +852,36 @@ def ask(
     for ek, model_ids in all_models.items():
         merge_discovered_models(ek, model_ids)
 
+    # VRAM-aware tier routing (opt-in via [router] enabled). When the user did
+    # not pin a model with -m, classify the query and route it to fast/balanced/
+    # deep with a hybrid GPU/CPU split sized to the active offload profile. The
+    # decision is logged every turn and surfaced in the inference profile so
+    # routing + VRAM decisions stay auditable. num_gpu is threaded to the engine
+    # so the offload budget is actually enforced (Ollama).
+    route_decision = None
+    engine_kwargs: dict = {}
+    if config.router.enabled and not user_set_model:
+        try:
+            from openjarvis.learning.routing.tier_router import route as _route_query
+
+            route_decision = _route_query(query_text, config)
+            model_name = route_decision.model
+            engine_kwargs["num_gpu"] = route_decision.offload.num_gpu
+            if not user_set_max_tokens:
+                max_tokens = route_decision.max_tokens
+                user_set_max_tokens = True  # already accounts for complexity
+            logger.info(
+                "router: tier=%s model=%s profile=%s num_gpu=%s | %s",
+                route_decision.tier.value,
+                route_decision.model,
+                route_decision.profile.value,
+                route_decision.offload.num_gpu,
+                route_decision.reason,
+            )
+        except Exception as exc:  # never let routing break a query
+            logger.debug("tier routing failed, using default selection: %s", exc)
+            route_decision = None
+
     # Resolve model via config fallback chain
     if model_name is None:
         model_name = config.intelligence.default_model
@@ -915,6 +966,7 @@ def ask(
                 model_name,
                 console,
                 complexity_result=complexity_result,
+                route_decision=route_decision,
             )
 
         if telem_store is not None:
@@ -989,6 +1041,7 @@ def ask(
                 model=model_name,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                **engine_kwargs,
             )
     except EngineConnectionError as exc:
         console.print(f"[red]Engine error:[/red] {exc}")
@@ -1009,6 +1062,7 @@ def ask(
             model_name,
             console,
             complexity_result=complexity_result,
+            route_decision=route_decision,
         )
 
     # Cleanup

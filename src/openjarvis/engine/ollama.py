@@ -79,6 +79,30 @@ def _default_num_ctx() -> int:
         return 16384
 
 
+def _build_options(
+    temperature: float, max_tokens: int, kwargs: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Build Ollama request ``options``, including the VRAM-aware GPU split.
+
+    ``num_gpu`` caps how many layers Ollama places on the GPU — the realisation
+    of an :class:`~openjarvis.engine.offload.OffloadPlan` (hybrid CPU+GPU). When
+    absent, Ollama auto-derives the split as before. ``num_gpu = 0`` runs the
+    model fully on the CPU (the gaming / cpu-only escape hatch).
+    """
+    opts: Dict[str, Any] = {
+        "temperature": temperature,
+        "num_predict": max_tokens,
+        "num_ctx": kwargs.get("num_ctx", _default_num_ctx()),
+    }
+    num_gpu = kwargs.get("num_gpu")
+    if num_gpu is not None:
+        opts["num_gpu"] = int(num_gpu)
+    main_gpu = kwargs.get("main_gpu")
+    if main_gpu is not None:
+        opts["main_gpu"] = int(main_gpu)
+    return opts
+
+
 @EngineRegistry.register("ollama")
 class OllamaEngine(InferenceEngine):
     """Ollama backend via its native HTTP API."""
@@ -126,11 +150,7 @@ class OllamaEngine(InferenceEngine):
             "model": model,
             "messages": msg_dicts,
             "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens,
-                "num_ctx": kwargs.get("num_ctx", _default_num_ctx()),
-            },
+            "options": _build_options(temperature, max_tokens, kwargs),
         }
         # Disable extended thinking by default (Qwen3.5 etc.).
         # When enabled, thinking tokens consume the entire budget and
@@ -248,11 +268,7 @@ class OllamaEngine(InferenceEngine):
             "model": model,
             "messages": messages_to_dicts(messages),
             "stream": True,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens,
-                "num_ctx": kwargs.get("num_ctx", _default_num_ctx()),
-            },
+            "options": _build_options(temperature, max_tokens, kwargs),
         }
         # Mirror generate()'s default: disable extended thinking unless the
         # caller opted in. Qwen3/etc. with thinking on can stall the visible
@@ -327,11 +343,7 @@ class OllamaEngine(InferenceEngine):
             "model": model,
             "messages": msg_dicts,
             "stream": True,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens,
-                "num_ctx": kwargs.get("num_ctx", _default_num_ctx()),
-            },
+            "options": _build_options(temperature, max_tokens, kwargs),
         }
         if "think" not in kwargs:
             payload["think"] = False

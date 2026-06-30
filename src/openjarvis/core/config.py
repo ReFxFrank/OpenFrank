@@ -1602,11 +1602,68 @@ class RuntimeConfig:
     egress_allowlist: str = ""
 
 
+@dataclass(slots=True)
+class OffloadConfig:
+    """VRAM-aware hybrid CPU+GPU offload — the headroom guarantee.
+
+    Hybrid (split layers across GPU VRAM + system RAM) is the default execution
+    model. The active *profile* sets how much VRAM the assistant may use, so it
+    never starves the rest of the machine. The engine places as many layers on
+    the GPU as the budget allows (Ollama ``num_gpu`` / llama.cpp ``n-gpu-layers``)
+    and runs the rest on the CPU.
+    """
+
+    # "auto" (pick from current GPU usage) | idle | multitask | gaming | cpu_only.
+    profile: str = "auto"
+    # VRAM kept free before computing the budget (GB).
+    safety_margin_gb: float = 0.5
+    # VRAM reserved for the always-resident embedding + reranker models (GB).
+    resident_reserve_gb: float = 1.5
+    # GPU to read VRAM from / load onto.
+    gpu_index: int = 0
+    # Per-profile budget cap overrides (GB); <= 0 means use the built-in default.
+    idle_budget_gb: float = 0.0
+    multitask_budget_gb: float = 0.0
+    gaming_budget_gb: float = 0.0
+    # Context is a VRAM tax — keep flash-attn on and the KV cache quantized.
+    flash_attention: bool = True
+    kv_cache_quant: str = "q8"  # "" (off) | "q8" | "q4"
+
+
+@dataclass(slots=True)
+class RouterConfig:
+    """Tier-based model router: classify a query → fast / balanced / deep.
+
+    Each tier maps to a specific local model (+ optional engine). Disabled by
+    default so it never silently overrides an explicit model choice; when on,
+    ``jarvis ask`` routes per-query and logs the chosen tier + offload split.
+    """
+
+    enabled: bool = False
+    # Tier → model (Ollama tags by default; tuned for the RTX 5080 16 GB rig).
+    fast_model: str = "qwen3:8b"
+    balanced_model: str = "qwen3:14b"
+    deep_model: str = "gpt-oss:20b"  # MoE — degrades gracefully under offload
+    # Tier → engine ("" = use the active/default engine).
+    fast_engine: str = ""
+    balanced_engine: str = ""
+    deep_engine: str = ""
+    # Complexity-score boundaries: < fast_max → fast; >= deep_min → deep; else balanced.
+    fast_max_score: float = 0.30
+    deep_min_score: float = 0.80
+    # If the chosen tier can't get any GPU layers, fall to a lighter tier.
+    allow_downgrade: bool = True
+    # Optional self-verification (critique) pass before returning deep answers.
+    self_verify: bool = False
+
+
 @dataclass
 class JarvisConfig:
     """Top-level configuration for OpenJarvis."""
 
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    offload: OffloadConfig = field(default_factory=OffloadConfig)
+    router: RouterConfig = field(default_factory=RouterConfig)
     installed_at: str = ""
     installer_version: str = ""
     hardware: HardwareInfo = field(default_factory=HardwareInfo)
@@ -1872,6 +1929,8 @@ def load_config(path: Optional[Path] = None) -> JarvisConfig:
         # nested sub-configs (engine.ollama, learning.routing, channel.*, etc.)
         top_sections = (
             "runtime",
+            "offload",
+            "router",
             "engine",
             "intelligence",
             "learning",
@@ -2019,6 +2078,28 @@ def generate_default_toml(
 local_only = true
 # enforce_egress_guard = true   # install the process-wide socket guard
 # egress_allowlist = ""          # extra host[:port] entries to permit, comma-sep
+
+[offload]
+# VRAM-aware hybrid CPU+GPU split — keeps the rest of the PC usable (games,
+# browser). "auto" picks from current GPU usage; or pin idle / multitask /
+# gaming / cpu_only. The assistant places as many model layers on the GPU as the
+# profile's budget allows and runs the rest on CPU/RAM (never OOMs the card).
+profile = "auto"
+safety_margin_gb = 0.5
+resident_reserve_gb = 1.5     # leave room for embedding + reranker models
+flash_attention = true        # context is a VRAM tax — keep it cheap
+kv_cache_quant = "q8"         # "" | "q8" | "q4"
+# idle_budget_gb = 14.0       # per-profile cap overrides (<=0 = built-in default)
+# multitask_budget_gb = 9.0
+# gaming_budget_gb = 3.0
+
+[router]
+# Per-query tier routing. Off by default (an explicit -m / default_model wins).
+# Turn on to route fast/balanced/deep by query complexity and log the choice.
+enabled = false
+fast_model = "qwen3:8b"
+balanced_model = "qwen3:14b"
+deep_model = "gpt-oss:20b"    # MoE — cheap to offload, big-model quality
 
 [engine]
 default = "{engine}"
@@ -2256,6 +2337,8 @@ __all__ = [
     "JarvisConfig",
     "LearningConfig",
     "RuntimeConfig",
+    "OffloadConfig",
+    "RouterConfig",
     "LMStudioEngineConfig",
     "LlamaCppEngineConfig",
     "MCPConfig",

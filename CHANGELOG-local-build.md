@@ -11,6 +11,59 @@ VRAM split) are recorded as targets to re-measure on the real rig — see
 
 ---
 
+## Phase 2 — Smarter routing & VRAM-aware model management
+
+**Goal:** route each query to the right tier (fast/balanced/deep) and make hybrid
+CPU+GPU the default — split each model across VRAM + RAM sized by an offload
+profile so the assistant never starves the rest of the PC and never OOMs.
+
+- **Offload profiles + VRAM budget (the headroom guarantee, critical).** New
+  `engine/offload.py`: `OffloadProfile` (idle ~14 GB / multitask ~9 GB / gaming
+  ~3 GB / cpu_only), live VRAM reads via `pynvml` → `nvidia-smi` → graceful
+  CPU-only fallback (`read_vram`), `auto_select_profile` from current GPU usage,
+  and `plan_offload` → a concrete GPU layer count (`num_gpu`). The budget is
+  `min(profile cap, live_free − margin) − resident_reserve`, so it never exceeds
+  what's physically free (can't evict the user's other GPU apps). If the budget
+  can't fit even one layer it **shifts to CPU** (`num_gpu=0`) rather than OOMing.
+  Includes Q4/Q8/fp16 footprint + KV-cache estimators (context is a VRAM tax).
+
+- **Tier router.** New `learning/routing/tier_router.py`: reuses the existing
+  complexity analyzer, maps score → fast/balanced/deep (configurable
+  boundaries), resolves tier → model+engine, and builds the offload plan into a
+  single traceable `RouteDecision` (`to_trace()`). If the chosen tier can't get
+  any GPU layers and a GPU is present, it **drops a tier** rather than running a
+  heavy model fully on CPU. Pure decision function — unit-testable with a mocked
+  `VramStatus`.
+
+- **Config.** `[offload]` (profile/auto, margins, resident reserve, per-profile
+  budget overrides, flash-attn, KV-cache quant) and `[router]` (enabled,
+  tier→model+engine, score boundaries, downgrade, self-verify) in `core/config.py`,
+  both in the default config generator. `router.enabled` defaults **false** so an
+  explicit `-m` is never silently overridden.
+
+- **Engine plumbing.** `engine/ollama.py` now threads `num_gpu` (+ `main_gpu`)
+  into the Ollama request `options` via a new `_build_options` helper, so an
+  `OffloadPlan` actually enforces the GPU/CPU split (`num_gpu=0` = cpu-only).
+  Absent → Ollama auto-derives the split (unchanged behaviour).
+
+- **Request-path integration (opt-in, traceable).** `cli/ask.py`: when
+  `[router] enabled` and the user didn't pin `-m`, it routes per-query, logs the
+  chosen tier/model/profile/num_gpu **every turn**, threads `num_gpu` to the
+  engine, and surfaces the tier + GPU/CPU split + VRAM budget in the inference
+  profile panel.
+
+- **Tests (49):** `tests/engine/test_offload.py`, `tests/engine/test_ollama_offload_options.py`,
+  `tests/learning/routing/test_tier_router.py`, `tests/core/test_phase2_config.py` —
+  profile auto-select, budget capping by free VRAM, fits/partial/CPU-shift
+  planning, tier classification, tier downgrade, num_gpu plumbing, config overlay.
+
+**Verification:** engine + learning/routing + core = 791 passed, 0 failed; ruff
+clean; existing `tests/cli/test_ask_router.py` still passes. Real tokens/sec,
+VRAM split and the concurrent-load (assistant + game) smoke test require the RTX
+5080 rig + Ollama — `baseline.json` records the targets to confirm there.
+
+---
+
 ## Phase 6 — Security hardening (malformed-hex / signature panic DoS)
 
 **Goal:** fix the known malformed-hex / signature-verification panic in the Rust
