@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-06-30",
+  "purpose": "Phase 0 baseline for the fully-local RTX-5080 fork. Two parts: (1) what was actually measured on the recon machine, and (2) the per-tier hardware targets from the brief, which MUST be re-measured on the real rig before they are trusted.",
+  "recon_machine": {
+    "kind": "CI / recon container (NOT the target machine)",
+    "os": "Linux 6.18.5 (x86_64)",
+    "gpu": null,
+    "nvidia_smi_available": false,
+    "ollama_available": false,
+    "cpu_only": true,
+    "python": "3.11.15",
+    "rust": "cargo 1.94.1",
+    "note": "No NVIDIA GPU and no Ollama here, so tokens/sec, VRAM split and energy CANNOT be measured. Code-level phases (1 config/factory/egress, 6 Rust DoS fix) are fully verifiable; GPU phases are scaffolded + documented for the rig."
+  },
+  "measured": {
+    "test_suite": {
+      "command": "uv run pytest tests/ -q --continue-on-collection-errors -m 'not live and not cloud and not nvidia and not amd and not apple and not macos15 and not live_channel and not hub and not live_external and not modal and not docker and not slow'",
+      "extras_installed": ["dev"],
+      "passed": 6771,
+      "failed_distinct": 13,
+      "skipped": 163,
+      "deselected": 70,
+      "collection_errors": 1,
+      "wall_clock_seconds": 199.7,
+      "all_failures_are_environmental": true,
+      "failure_causes": {
+        "missing_starlette": [
+          "tests/deploy/test_deploy_auth.py::test_check_bind_safety[*]"
+        ],
+        "missing_polars_framework_comparison_extra": [
+          "tests/evals/comparison/test_export_to_table_gen_roundtrip.py (collection error)"
+        ],
+        "web_search_backend_or_keys": [
+          "tests/tools/test_web_search.py::TestWebSearchTool::test_execute_no_api_key",
+          "tests/tools/test_web_search.py::TestWebSearchTool::test_execute_tavily_error"
+        ],
+        "telemetry_energy_backend": [
+          "tests/cli/test_telemetry_cmd.py::TestTelemetryExport::*",
+          "tests/telemetry/test_energy_wiring.py::*"
+        ],
+        "docs_leaderboard_workflow_fixture": [
+          "tests/deployment/test_docs_leaderboard.py::test_docs_workflow_injects_the_anon_key"
+        ]
+      },
+      "note": "Zero code changed when this was captured, so every failure above is a pre-existing, missing-optional-dependency artifact of the recon container. The contract for later phases is: do not increase this count in the suites touched."
+    },
+    "rust_extension": {
+      "builds": true,
+      "build_command": "uv run maturin develop --manifest-path rust/crates/openjarvis-python/Cargo.toml",
+      "build_seconds": 112,
+      "module_importable": "openjarvis_rust",
+      "rust_bridge_tests": "pass after build"
+    }
+  },
+  "targets_to_remeasure_on_rig": {
+    "_comment": "Starting targets from the build brief for an RTX 5080 (16 GB GDDR7) + 64 GB DDR5 under the default 'multitask' offload profile (~8-10 GB VRAM budget). NOT measured here. Re-run on the rig with nvidia-smi + ollama ps and overwrite the 'actual_*' fields. Speeds are tok/s, sizes/VRAM in GB.",
+    "offload_profiles": {
+      "idle":      {"vram_budget_gb": 14, "description": "GPU free; models mostly/entirely on GPU"},
+      "multitask": {"vram_budget_gb": 9,  "description": "DEFAULT; light partial offload, ~6-8 GB left free"},
+      "gaming":    {"vram_budget_gb": 3,  "description": "GPU busy; heavy offload or cpu-only"}
+    },
+    "tiers": [
+      {"tier": "fast",     "model": "Qwen3 8B / Gemma 4 E4B", "size_q4_gb": 5.5,  "split": "all GPU",            "free_vram_gb_target": 10, "tok_s_target": "80-130", "actual_tok_s": null, "actual_free_vram_gb": null},
+      {"tier": "balanced", "model": "Qwen3 14B",              "size_q4_gb": 9.5,  "split": "~8 GB GPU / 1-2 CPU", "free_vram_gb_target": 7,  "tok_s_target": "50-90",  "actual_tok_s": null, "actual_free_vram_gb": null},
+      {"tier": "deep",     "model": "GPT-OSS 20B / Llama 4 Scout (MoE)", "size_q4_gb": 14, "split": "~8-10 GPU / rest RAM", "free_vram_gb_target": 6, "tok_s_target": "25-40", "actual_tok_s": null, "actual_free_vram_gb": null},
+      {"tier": "dense_fallback", "model": "Qwen3 32B",        "size_q4_gb": 19.5, "split": "~10 GPU / 9 CPU",    "free_vram_gb_target": 4,  "tok_s_target": "10-20",  "actual_tok_s": null, "actual_free_vram_gb": null}
+    ],
+    "always_resident": ["embedding model (nomic-embed-text)", "cross-encoder reranker"],
+    "always_resident_vram_gb": "<2"
+  },
+  "task_eval": {
+    "status": "not_run_on_recon_machine",
+    "reason": "Task-success / latency / energy require a working local engine (Ollama + a pulled model) and the target GPU. The ~50-prompt personal-assistant suite (chat, multi-step reasoning, tool-use, RAG) must be run on the rig; use existing evals (openjarvis.evals) + tools/pearl-reference-oracle. Results land in the Phase 7 before/after report.",
+    "prompt_suite_size_target": 50
+  }
+}
