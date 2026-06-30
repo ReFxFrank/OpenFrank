@@ -10,6 +10,24 @@ and `ollama ps`; see `baseline.json` for the targets.
 
 ---
 
+## 0. Quickstart (WSL2 — two scripts)
+
+If you're on WSL2/Ubuntu, the whole setup is two commands. Clone into the **WSL
+home** (not `/mnt/c` — building on the Windows mount is slow and OneDrive locks
+build files):
+
+```bash
+cd ~ && git clone https://github.com/refxfrank/openfrank.git && cd openfrank
+bash scripts/install/setup-wsl.sh      # installs toolchain + builds + pulls models
+bash scripts/start.sh                   # launches the assistant (interactive chat)
+```
+
+`start.sh` also takes `ask "question"`, `serve`, or `doctor`. The manual
+step-by-step below explains what those scripts do and how to configure things;
+read on if you want the details or are on native Windows.
+
+---
+
 ## 1. Install
 
 Pick **one** path and stick with it.
