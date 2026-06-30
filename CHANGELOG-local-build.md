@@ -9,6 +9,72 @@ the Rust DoS fix) are fully verified here; GPU-dependent numbers (tokens/sec,
 VRAM split) are recorded as targets to re-measure on the real rig — see
 `docs/local-build/baseline.json`.
 
+## Final deliverables (status)
+
+| Deliverable | Location | Status |
+|---|---|---|
+| Architecture map | `docs/local-build/ARCHITECTURE.md` | ✅ |
+| Security/threat-model | `docs/local-build/SECURITY.md` | ✅ |
+| Offline run guide | `docs/local-build/RUNNING-OFFLINE.md` | ✅ |
+| Baseline | `docs/local-build/baseline.json` | ✅ |
+| Before/after eval report | `docs/local-build/EVAL-REPORT.md` (+ generator) | ✅ before; after pending rig run |
+| Offline verify scripts | `scripts/verify-offline.{sh,ps1}` | ✅ |
+| This changelog | `CHANGELOG-local-build.md` | ✅ |
+
+Definition-of-done items 1–4 (runs offline; no reachable cloud path in
+`local_only`; hybrid CPU+GPU respecting the offload profile; tests pass + new
+features covered) are met and verified here. Item 5 (before/after numbers,
+`jarvis doctor` green, GPU offload confirmed) needs the RTX 5080 + Ollama: the
+harness + report generator are committed and tested, ready to produce the real
+numbers on the rig.
+
+---
+
+## Phase 7 — Eval, telemetry & docs
+
+**Goal:** turn "smarter" into numbers — a before/after report (task success,
+tokens/sec, latency, free VRAM, energy), per-stage telemetry attribution, and a
+reproducible offline run guide.
+
+- **Personal-assistant eval suite (`evals/local_build/suite.py`).** ~50 prompts
+  across chat / multi-step reasoning / tool-use / RAG, each with an
+  expected-substring scorer where the answer is deterministic and an expected
+  routing tier; RAG prompts ship inline context so retrieval is gradable offline.
+
+- **Eval runner (`evals/local_build/runner.py`).** `run_eval(run_one, …)` scores
+  each prompt and aggregates per tier + per category (task success, tok/s,
+  latency, free VRAM, energy). `run_one` is injected (rig: route + engine +
+  telemetry; tests: a deterministic fake), so scoring/aggregation is verified
+  offline.
+
+- **Before/after report (`evals/local_build/report.py`).** `render_before_after`
+  emits a markdown table per tier/category with Δ and ⚠ on regressions;
+  `after=None` renders a before-only report with the after column pending.
+
+- **Per-stage telemetry attribution (`telemetry/stage_metrics.py`).** `StageTimer`
+  records per-stage seconds (routing / memory / verification / generation /
+  tools) plus the tightest free-VRAM sample, so each stage's cost and the
+  headroom guarantee are auditable per turn (complements the existing
+  prefill/decode energy split).
+
+- **Scripts + committed report.** `scripts/run_local_eval.py` runs the suite on
+  the rig and writes results JSON; `scripts/gen_eval_report.py` renders
+  `docs/local-build/EVAL-REPORT.md` from `baseline.json` (before) + that JSON
+  (after). The report is committed now with before = Phase 0 targets and the
+  after column marked pending — regenerable in one command after a rig run.
+
+- **Docs.** `RUNNING-OFFLINE.md` already covers install / `local_only` / VRAM cap
+  / per-tier pulls / KV-quant / RAG ingestion / verify; the learning-loop and
+  eval steps were added in Phases 5 and 7.
+
+- **Tests (18):** `tests/telemetry/test_stage_metrics.py` (stage timing + VRAM
+  sampling), `tests/evals/local_build/test_eval_harness.py` (suite coverage,
+  scoring, aggregation, before/after rendering incl. deltas).
+
+**Verification:** Phase 7 suites = 18 passed; telemetry = 281 passed (the 2
+energy-wiring failures are pre-existing environmental); ruff clean; report
+generated from baseline.
+
 ---
 
 ## Phase 5 — Activate the learning loop (local, reversible, idle-scheduled)

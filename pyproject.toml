@@ -228,6 +228,8 @@ select = ["E", "F", "I", "W"]
 [tool.ruff.lint.per-file-ignores]
 "src/openjarvis/evals/datasets/*.py" = ["E501"]
 "src/openjarvis/evals/scorers/*.py" = ["E501"]
+# Eval suite is data (prompt + inline RAG context strings), like datasets above.
+"src/openjarvis/evals/local_build/suite.py" = ["E501"]
 # hybrid/ is research code with long prompt strings and paradigm-specific
 # config dicts — same relaxation as evals research code above. The ``**`` glob
 # also covers subpackages (e.g. hybrid/skillorchestra/), which the prior

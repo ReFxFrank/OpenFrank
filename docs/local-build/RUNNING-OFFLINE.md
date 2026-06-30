@@ -228,7 +228,26 @@ automatically; either way a snapshot is kept so you can roll back by hand.
 
 ---
 
-## 8. Keep the GPU free while gaming
+## 8. Measure the before/after lift
+
+Prove "smarter" with numbers on your own rig:
+
+```bash
+# Run the ~50-prompt personal-assistant suite (chat, reasoning, tool-use, RAG):
+uv run python scripts/run_local_eval.py --label after -o docs/local-build/after.json
+
+# Render the before/after report (before = Phase 0 targets in baseline.json):
+uv run python scripts/gen_eval_report.py --after docs/local-build/after.json
+#   → docs/local-build/EVAL-REPORT.md  (task success, tok/s, latency, free VRAM, energy)
+```
+
+Per-turn stage costs (routing / memory / verification / generation) and the
+tightest free-VRAM seen are captured by `openjarvis.telemetry.StageTimer`, so the
+headroom guarantee is auditable, not just asserted.
+
+---
+
+## 9. Keep the GPU free while gaming
 
 - Set `[offload] profile = "gaming"` (or `cpu_only`) before launching a game, or
   leave `profile = "auto"` and the planner will detect the busy GPU and shrink

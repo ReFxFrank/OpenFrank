@@ -42,6 +42,7 @@ except ImportError:
     pass
 
 from openjarvis.telemetry.batch import BatchMetrics, EnergyBatch
+from openjarvis.telemetry.stage_metrics import StageBreakdown, StageTimer
 from openjarvis.telemetry.steady_state import (
     SteadyStateConfig,
     SteadyStateDetector,
@@ -88,6 +89,8 @@ __all__ = [
     "GpuSample",
     "GpuSnapshot",
     "ModelStats",
+    "StageBreakdown",
+    "StageTimer",
     "TelemetryAggregator",
     "TelemetryStore",
     "VLLMMetrics",
