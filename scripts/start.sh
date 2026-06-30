@@ -46,8 +46,14 @@ ensure_ollama() {
   log "Starting Ollama in the background..."
   mkdir -p "$HOME/.openjarvis"
   nohup ollama serve >"$HOME/.openjarvis/ollama.log" 2>&1 &
+  local srv=$!
   for _ in $(seq 1 30); do
     if curl -fsS "$OLLAMA_URL/api/tags" >/dev/null 2>&1; then return 0; fi
+    # Bail out fast if the server died (e.g. port already held by a dead proc).
+    if ! kill -0 "$srv" 2>/dev/null; then
+      warn "ollama serve exited early; see $HOME/.openjarvis/ollama.log"
+      return 1
+    fi
     sleep 1
   done
   warn "Ollama did not become ready; see $HOME/.openjarvis/ollama.log"
@@ -55,10 +61,13 @@ ensure_ollama() {
 }
 
 ensure_models() {
+  # Match the exact NAME column (col 1, sans header). A substring match would
+  # false-positive (e.g. "qwen3:8b" inside "qwen3:8b-instruct-q4") and skip a
+  # genuinely-missing model, which then fails at runtime.
   local installed
-  installed="$(ollama list 2>/dev/null || true)"
+  installed="$(ollama list 2>/dev/null | awk 'NR>1{print $1}' || true)"
   for m in "${MODELS[@]}"; do
-    if printf '%s\n' "$installed" | grep -qF "$m"; then continue; fi
+    if printf '%s\n' "$installed" | grep -qxF "$m"; then continue; fi
     log "Pulling $m (one-time download)..."
     ollama pull "$m" || warn "could not pull $m (deep/balanced queries may fail until it's present)"
   done

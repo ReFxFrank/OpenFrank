@@ -175,7 +175,7 @@ uv sync --extra memory-faiss        # adds sentence-transformers for the cross-e
 
 Ingest your own docs (PDFs/notes/folders), fully on disk:
 ```bash
-jarvis knowledge add ~/Documents/notes        # or a single PDF/markdown file
+jarvis memory index ~/Documents/notes        # a folder, or a single PDF/markdown file
 ```
 
 Long-term memory (durable facts/preferences across sessions) survives restarts;

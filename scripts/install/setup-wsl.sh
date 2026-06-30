@@ -66,7 +66,7 @@ fi
 export PATH="$HOME/.local/bin:$PATH"
 command -v uv >/dev/null 2>&1 || die "uv still not on PATH; restart the shell and re-run."
 
-# --- 3. Rust (repo pins 1.88 via rust-toolchain.toml) ----------------------
+# --- 3. Rust (pinned to 1.88 by rust/rust-toolchain.toml) ------------------
 if ! command -v rustup >/dev/null 2>&1; then
   log "Installing rustup (Rust toolchain manager)..."
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -92,10 +92,15 @@ uv run maturin develop --release \
   --manifest-path rust/crates/openjarvis-python/Cargo.toml
 
 # --- 6. config (local-only by default) -------------------------------------
-CONFIG="${OPENJARVIS_HOME:-$HOME/.openjarvis}/config.toml"
+# Ask the app where its config lives (honours OPENJARVIS_HOME / XDG_DATA_HOME),
+# falling back to the common default if that fails.
+CONFIG="$(uv run python -c 'from openjarvis.core.paths import get_config_path; print(get_config_path())' 2>/dev/null || echo "${OPENJARVIS_HOME:-$HOME/.openjarvis}/config.toml")"
 if [ ! -f "$CONFIG" ]; then
   log "Writing default config ([runtime] local_only = true)..."
-  uv run jarvis init || warn "jarvis init failed; configure $CONFIG manually (see docs/local-build/RUNNING-OFFLINE.md)."
+  # Non-interactive: pick ollama and skip the model-download prompt (we pull
+  # models in step 8). Without these flags, `jarvis init` blocks on a TTY.
+  uv run jarvis init --engine ollama --no-download ||
+    warn "jarvis init failed; configure $CONFIG manually (see docs/local-build/RUNNING-OFFLINE.md)."
 fi
 
 # --- 7. GPU sanity (soft) --------------------------------------------------
