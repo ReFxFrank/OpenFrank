@@ -1,0 +1,7 @@
+# Keep shell scripts LF even when cloned on Windows (Git autocrlf=true).
+# Otherwise bash (WSL/Linux/Git Bash) chokes on the CR in `set -euo pipefail`
+# and every other line — see scripts/install/setup-wsl.sh, scripts/start.sh.
+*.sh text eol=lf
+
+# PowerShell scripts are happiest as CRLF on Windows.
+*.ps1 text eol=crlf
